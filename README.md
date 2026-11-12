@@ -1,51 +1,54 @@
-# 🧾 Smart Grocery List Generator from Receipt Scans
+# Goodbasket
 
-An AI-powered web application that helps users manage their grocery lists by automatically extracting items and prices from receipt images.
+Goodbasket turns grocery receipt photos into a clean list of purchased items and prices. It saves a shopping history, exports that history to Excel, and suggests a few related groceries based on what was scanned.
 
-## ✨ Features
+## How it works
 
-- **AI-Powered Extraction**: Upload a photo of a receipt, and the app uses Google's Gemini AI (`gemini-1.5-flash`) to accurately extract grocery items and their prices, intelligently ignoring taxes and totals.
-- **Persistent Storage**: Automatically logs all extracted items, prices, and timestamps into a SQLite database (`grocery.db`) and an Excel spreadsheet (`receipts.xlsx`) for easy expense tracking and record-keeping.
-- **Smart Recommendations**: Suggests related grocery items you might need based on your purchases (e.g., if you bought milk, it recommends cereal or cookies).
-- **Clean User Interface**: A simple and intuitive web interface for uploading receipts and viewing results.
+1. Select or drop a JPEG, PNG, or WebP receipt image (up to 8 MB).
+2. The Flask backend validates the image and sends it to Gemini for item and price extraction.
+3. Extracted items are saved to SQLite and appended to `receipts.xlsx`.
+4. The page displays the latest scan, a receipt total, relevant suggestions, and the last 100 saved items.
 
-## 🛠️ Technology Stack
+Receipt images are processed in memory and are not saved by the current upload flow. SQLite is the primary store; the Excel workbook is a convenient export.
 
-- **Backend**: Python, Flask
-- **AI Engine**: Google Generative AI (Gemini 1.5 Flash)
-- **Database**: SQLite
-- **Data Export**: pandas, openpyxl (Excel integration)
-- **Image Processing**: Pillow (PIL)
-- **Frontend**: HTML, CSS, JavaScript
+## Setup
 
-## 🚀 Setup & Installation
+1. Install Python 3.10 or newer.
+2. Install dependencies:
 
-1. **Clone the repository** or navigate to the project directory.
-2. **Install required dependencies**:
    ```bash
-   pip install Flask pandas openpyxl Pillow google-generativeai
+   pip install -r requirements.txt
    ```
-3. **Configure API Key**:
-   The app requires a Google Gemini API key to function. The key is currently set in `app.py`. *(Note: For production, it is highly recommended to store this key in a `.env` file instead of hardcoding it).*
-4. **Run the Application**:
+
+3. Copy `.env.example` to `.env` in the project root and add your Gemini API key:
+
+   ```env
+   GEMINI_API_KEY=your_gemini_api_key
+   ```
+
+   The key is read from the environment and must not be committed to source control. You can optionally set `GEMINI_MODEL`, `DATABASE_PATH`, `EXCEL_PATH`, or `FLASK_DEBUG` in the same file. If you used an earlier version of this project, replace the Gemini key that was previously embedded in `app.py`.
+
+4. Start the app:
+
    ```bash
    python app.py
    ```
-5. Open your web browser and navigate to `http://127.0.0.1:5000`.
 
-## 📁 Project Structure
+5. Open <http://127.0.0.1:5000>.
 
-- `app.py`: The main Flask application containing routing logic, Gemini AI integration, and database operations.
-- `grocery.db`: The SQLite database that stores your extracted grocery data. *(Auto-generated upon running)*
-- `receipts.xlsx`: An Excel file acting as a secondary data log. *(Auto-generated upon running)*
-- `templates/`: Contains HTML templates for the web interface.
-- `static/`: Contains static assets like CSS styles and JavaScript files.
-- `uploads/`: A temporary directory for storing uploaded receipt images before they are processed by the AI.
+Without `GEMINI_API_KEY`, the page and saved history remain available, but receipt scanning returns a configuration error.
 
-## 💡 How it Works
+## Project structure
 
-1. **Upload**: The user uploads an image of a grocery receipt via the web interface.
-2. **Process**: The backend saves the image temporarily and sends it to the Gemini AI model with a specific prompt to extract just the purchased items and their prices.
-3. **Store**: The extracted data is formatted and saved to both the SQLite database and appended to the Excel file.
-4. **Recommend**: The app cross-references the extracted items against a predefined recommendation map to generate smart suggestions.
-5. **Display**: The parsed list and recommendations are sent back and displayed neatly on the frontend.
+```text
+app.py                 Flask routes, Gemini extraction, recommendations, and storage
+frontend/              All frontend files in one folder
+  index.html           Page template
+  styles.css           Responsive UI styles
+  script.js            Upload flow and page interactions
+grocery.db             SQLite purchase history (created automatically)
+receipts.xlsx          Spreadsheet export (created after the first successful scan)
+requirements.txt       Python dependencies
+```
+
+The frontend is served by Flask from the single `frontend/` directory. Uploaded receipt images are limited to JPEG, PNG, and WebP and are not retained after processing.

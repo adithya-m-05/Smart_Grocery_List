@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f5ef">
+  <meta name="description" content="Turn grocery receipts into a useful, organized shopping list.">
+  <title>Goodbasket — your groceries, in order</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Goodbasket home">
+        <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M6 11h20l-2 16H8L6 11Z"/><path d="M11 12V9a5 5 0 0 1 10 0v3M12 17v5m8-5v5"/></svg></span>
+        <span>goodbasket<span class="brand-period">.</span></span>
+      </a>
+      <div class="topbar-note"><span class="status-dot"></span> Your personal grocery companion</div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow"><span class="eyebrow-line"></span> SHOP SMARTER, ONE RECEIPT AT A TIME</p>
+          <h1>Your groceries,<br><span>in good order.</span></h1>
+          <p class="hero-description">Drop in a receipt and we’ll turn it into a tidy list, keep track of what you spent, and suggest what might be missing.</p>
+          <div class="hero-points">
+            <span><span class="check-icon">✓</span> No manual typing</span>
+            <span><span class="check-icon">✓</span> Your history, saved</span>
+          </div>
+        </div>
+        <div class="hero-art" aria-hidden="true">
+          <div class="art-sun"></div>
+          <div class="art-leaf leaf-one"></div><div class="art-leaf leaf-two"></div>
+          <div class="grocery-bag"><div class="bag-handle"></div><div class="bag-face"><div class="produce produce-orange"></div><div class="produce produce-green"></div><div class="produce produce-red"></div><div class="bag-smile"></div></div></div>
+          <div class="art-star star-one">✳</div><div class="art-star star-two">✳</div>
+          <div class="art-caption">A little less list-making.<br>A lot more living.</div>
+        </div>
+      </section>
+
+      <section class="workspace" aria-label="Receipt workspace">
+        <div class="upload-panel panel">
+          <div class="panel-heading">
+            <div><p class="section-kicker">01 <span>·</span> START HERE</p><h2>Scan a receipt</h2></div>
+            <span class="heading-icon" aria-hidden="true">↗</span>
+          </div>
+          <p class="panel-copy">A clear photo is all it takes. We’ll pick out the items and prices for you.</p>
+          <form id="upload-form">
+            <label class="dropzone" id="dropzone" for="receipt">
+              <input type="file" name="receipt" id="receipt" accept="image/jpeg,image/png,image/webp" required>
+              <span class="upload-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L7 9m5-5 5 5M5 15v4a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-4"/></svg></span>
+              <span class="drop-title" id="file-name">Choose a receipt image</span>
+              <span class="drop-subtitle">or drag and drop it here</span>
+              <span class="file-types">JPG, PNG OR WEBP <i>·</i> UP TO 8 MB</span>
+            </label>
+            <button class="primary-button" id="submit-button" type="submit"><span>Build my grocery list</span><span aria-hidden="true">→</span></button>
+          </form>
+          <p class="privacy-note"><span aria-hidden="true">⌑</span> Your receipt is processed securely and isn’t stored as an image.</p>
+          <div class="message hidden" id="message" role="status" aria-live="polite"></div>
+        </div>
+
+        <div class="results-column">
+          <section class="result-panel panel hidden" id="result" aria-live="polite">
+            <div class="panel-heading result-heading">
+              <div><p class="section-kicker">02 <span>·</span> YOUR LATEST SCAN</p><h2>In your basket</h2></div>
+              <span class="item-count" id="item-count">0 ITEMS</span>
+            </div>
+            <div class="items-list" id="items-list"></div>
+            <div class="total-row"><span>Receipt total</span><strong id="receipt-total">0.00</strong></div>
+          </section>
+
+          <section class="recommendations-panel panel hidden" id="recommendations">
+            <div class="recommendation-heading"><span class="sparkle" aria-hidden="true">✳</span><div><p class="section-kicker">A GOOD IDEA</p><h3>Worth adding?</h3></div></div>
+            <p class="recommendation-copy">A few things that go well with what you bought.</p>
+            <div class="recommendation-list" id="recommendation-list"></div>
+          </section>
+
+          <section class="empty-state panel" id="empty-state">
+            <div class="receipt-illustration" aria-hidden="true"><div class="receipt-top">GOOD THINGS MARKET</div><span></span><span></span><span class="short-line"></span><div class="receipt-bottom">THANK YOU ♥</div></div>
+            <p class="empty-title">Your next list starts here.</p>
+            <p class="empty-copy">Scan a receipt to see your groceries<br>gather here, all neat and counted.</p>
+          </section>
+        </div>
+      </section>
+
+      <section class="history-section" aria-labelledby="history-title">
+        <div class="history-heading"><div><p class="section-kicker">YOUR SHOPPING, REMEMBERED</p><h2 id="history-title">Recent groceries</h2></div><span class="history-note">The last 100 items you’ve scanned</span></div>
+        <div class="history-table-wrap">
+          <table class="history-table"><thead><tr><th>ITEM</th><th>DATE ADDED</th><th class="price-cell">PRICE</th></tr></thead><tbody id="history-list"><tr class="history-empty"><td colspan="3">Your shopping history will show up here after your first scan.</td></tr></tbody></table>
+        </div>
+      </section>
+    </main>
+    <footer><span>Made for the everyday shop.</span><span>goodbasket<span class="brand-period">.</span></span></footer>
+  </div>
+  <script src="script.js" defer></script>
+</body>
+</html>

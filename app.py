@@ -1,246 +1,235 @@
-# from flask import Flask, request, jsonify, render_template
-# import requests
-# import os
+"""Receipt-powered grocery list application."""
 
-# app = Flask(__name__)
-
-# # Replace with your actual OCR.space API key
-# OCR_API_KEY = 'K84834139488957'
-
-# @app.route('/')
-# def index():
-#     return render_template('index.html')
-
-# @app.route('/upload', methods=['POST'])
-# def upload():
-#     if 'receipt' not in request.files:
-#         return jsonify({'error': 'No file part'}), 400
-
-#     file = request.files['receipt']
-#     if file.filename == '':
-#         return jsonify({'error': 'No selected file'}), 400
-
-#     # Send image to OCR.space API
-#     ocr_url = 'https://api.ocr.space/parse/image'
-#     payload = {
-#         'apikey': OCR_API_KEY,
-#         'language': 'eng',
-#         'isTable': True
-#     }
-#     files = {
-#         'file': (file.filename, file.stream, file.mimetype)
-#     }
-
-#     response = requests.post(ocr_url, data=payload, files=files)
-#     result = response.json()
-
-#     if result.get('IsErroredOnProcessing'):
-#         return jsonify({'error': result.get('ErrorMessage', 'OCR processing error')}), 500
-
-#     parsed_text = result['ParsedResults'][0]['ParsedText']
-#     items = parse_items(parsed_text)
-
-#     return jsonify({'items': items})
-
-# def parse_items(text):
-#     """
-#     Parses the OCR-extracted text to identify grocery items.
-#     This is a simplistic parser and may need enhancements for complex receipts.
-#     """
-#     lines = text.split('\n')
-#     items = []
-#     for line in lines:
-#         line = line.strip()
-#         if not line:
-#             continue
-#         # Basic heuristic: lines with alphabets and numbers
-#         if any(char.isalpha() for char in line) and any(char.isdigit() for char in line):
-#             items.append(line)
-#     return items
-
-# if __name__ == '__main__':
-#     app.run(debug=True)
-
-#first code above
-
-# from flask import Flask, render_template, request, jsonify
-# import requests
-# import os
-
-# app = Flask(__name__)
-
-# # Replace this with your actual OCR.Space API Key
-# OCR_API_KEY = 'K85024854288957'  # 🔑 REQUIRED
-
-# # Recommendations Map
-# RECOMMENDATION_MAP = {
-#     'milk': ['cereal', 'cookies'],
-#     'bread': ['butter', 'jam'],
-#     'rice': ['lentils', 'spices'],
-#     'eggs': ['cheese', 'bread'],
-#     'banana': ['milk', 'peanut butter'],
-#     'coffee': ['sugar', 'milk'],
-# }
-
-# # Recommend items based on scanned content
-# def recommend_items(items):
-#     recommendations = set()
-#     for item in items:
-#         item_lower = item.lower()
-#         for key in RECOMMENDATION_MAP:
-#             if key in item_lower:
-#                 recommendations.update(RECOMMENDATION_MAP[key])
-#     return list(recommendations)
-
-# @app.route('/')
-# def index():
-#     return render_template('index.html')
-
-# @app.route('/upload', methods=['POST'])
-# def upload():
-#     if 'receipt' not in request.files:
-#         return jsonify({'error': 'No file uploaded'})
-
-#     file = request.files['receipt']
-
-#     # Check for allowed image types
-#     if not file.filename.lower().endswith(('.png', '.jpg', '.jpeg')):
-#         return jsonify({'error': 'Unsupported file type. Please upload JPG or PNG.'})
-
-#     # OCR API call
-#     try:
-#         response = requests.post(
-#             'https://api.ocr.space/parse/image',
-#             files={'filename': (file.filename, file.stream, file.mimetype)},
-#             data={'apikey': OCR_API_KEY, 'language': 'eng'}
-#         )
-
-#         result = response.json()
-#         if result.get('IsErroredOnProcessing', False):
-#             error_msg = result.get('ErrorMessage', ['Unknown OCR error'])[0]
-#             return jsonify({'error': f'OCR failed: {error_msg}'})
-
-#         parsed_text = result['ParsedResults'][0]['ParsedText']
-#         lines = parsed_text.split('\n')
-#         items = [line.strip() for line in lines if line.strip()]
-#         recommendations = recommend_items(items)
-
-#         return jsonify({'items': items, 'recommendations': recommendations})
-#     except Exception as e:
-#         return jsonify({'error': f'Failed to parse receipt. {str(e)}'})
-
-# if __name__ == '__main__':
-#     app.run(debug=True)
-
-#above is 2nd code
-
+import json
 import os
-import uuid
+import re
 import sqlite3
+from datetime import datetime, timezone
+from io import BytesIO
+from pathlib import Path
+
 import pandas as pd
-from flask import Flask, request, jsonify, render_template
-from PIL import Image
-import google.generativeai as genai
-from datetime import datetime
+from dotenv import load_dotenv
+from flask import Flask, jsonify, render_template, request
+from PIL import Image, UnidentifiedImageError
+from werkzeug.exceptions import RequestEntityTooLarge
 
-app = Flask(__name__)
-UPLOAD_FOLDER = 'uploads'
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+try:
+    from google import genai as google_genai
+    from google.genai import types as genai_types
+except ImportError:
+    # Keep existing installations working while they upgrade to google-genai.
+    google_genai = None
+    genai_types = None
 
-DB_PATH = 'grocery.db'
-EXCEL_PATH = 'receipts.xlsx'
+try:
+    import google.generativeai as legacy_genai
+except ImportError:
+    legacy_genai = None
 
-# Gemini API key
-genai.configure(api_key="AIzaSyAU_TMouKpdwVxr6e01Km9VrtZtAi1YpSs")
-model = genai.GenerativeModel('gemini-1.5-flash-latest')
+load_dotenv()
 
-# Setup DB
-def init_db():
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS grocery_items (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                item TEXT,
-                price REAL,
-                timestamp TEXT
-            )
-        ''')
-init_db()
+BASE_DIR = Path(__file__).resolve().parent
+DB_PATH = Path(os.getenv("DATABASE_PATH", BASE_DIR / "grocery.db"))
+EXCEL_PATH = Path(os.getenv("EXCEL_PATH", BASE_DIR / "receipts.xlsx"))
+MAX_UPLOAD_BYTES = 8 * 1024 * 1024
+ALLOWED_FORMATS = {"JPEG", "PNG", "WEBP"}
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
-# Recommendations
+app = Flask(
+    __name__,
+    template_folder=str(BASE_DIR / "frontend"),
+    static_folder=str(BASE_DIR / "frontend"),
+    static_url_path="",
+)
+app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
+
 RECOMMENDATION_MAP = {
-    'milk': ['cereal', 'cookies'],
-    'bread': ['butter', 'jam'],
-    'rice': ['lentils', 'spices'],
-    'eggs': ['cheese', 'bread'],
-    'banana': ['milk', 'peanut butter'],
-    'coffee': ['sugar', 'milk'],
+    "milk": ["cereal", "cookies"],
+    "bread": ["butter", "jam"],
+    "rice": ["lentils", "spices"],
+    "egg": ["cheese", "bread"],
+    "banana": ["milk", "peanut butter"],
+    "coffee": ["sugar", "milk"],
+    "pasta": ["tomato sauce", "parmesan"],
+    "tomato": ["onion", "basil"],
 }
 
+
+def get_connection():
+    connection = sqlite3.connect(DB_PATH, timeout=10)
+    connection.row_factory = sqlite3.Row
+    return connection
+
+
+def init_db():
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with get_connection() as connection:
+        connection.execute(
+            """CREATE TABLE IF NOT EXISTS grocery_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                item TEXT NOT NULL,
+                price REAL NOT NULL DEFAULT 0,
+                timestamp TEXT NOT NULL
+            )"""
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_grocery_items_timestamp "
+            "ON grocery_items(timestamp DESC)"
+        )
+
+
 def recommend_items(items):
-    recommendations = set()
-    for item in items:
-        for key in RECOMMENDATION_MAP:
-            if key in item.lower():
-                recommendations.update(RECOMMENDATION_MAP[key])
-    return list(recommendations)
+    purchased = " ".join(item["name"].casefold() for item in items)
+    suggestions = set()
+    for keyword, related in RECOMMENDATION_MAP.items():
+        plural = "(?:s|es)?" if keyword.endswith(("a", "o")) else "s?"
+        if re.search(rf"\b{re.escape(keyword)}{plural}\b", purchased):
+            suggestions.update(related)
+    purchased_words = set(re.findall(r"[a-z]+", purchased))
+    return sorted(
+        suggestion for suggestion in suggestions
+        if not any(word in purchased_words for word in suggestion.casefold().split())
+    )
 
-def save_to_db_and_excel(items):
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    rows = []
 
-    with sqlite3.connect(DB_PATH) as conn:
-        for item in items:
-            parts = item.rsplit(' ', 1)
-            name = parts[0].strip()
-            price = float(parts[1]) if len(parts) > 1 and parts[1].replace('.', '', 1).isdigit() else 0.0
-            conn.execute("INSERT INTO grocery_items (item, price, timestamp) VALUES (?, ?, ?)",
-                         (name, price, timestamp))
-            rows.append({'Item': name, 'Price': price, 'Timestamp': timestamp})
+def parse_model_items(response_text):
+    """Parse and validate the model's JSON response before storing it."""
+    cleaned = response_text.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned, flags=re.I)
+    payload = json.loads(cleaned)
+    if isinstance(payload, dict):
+        payload = payload.get("items", [])
+    if not isinstance(payload, list):
+        raise ValueError("The receipt response did not contain an item list.")
 
-    # Append to Excel
-    df = pd.DataFrame(rows)
-    if os.path.exists(EXCEL_PATH):
-        old_df = pd.read_excel(EXCEL_PATH)
-        df = pd.concat([old_df, df], ignore_index=True)
-    df.to_excel(EXCEL_PATH, index=False)
+    items = []
+    for entry in payload:
+        if not isinstance(entry, dict):
+            continue
+        name = re.sub(r"\s+", " ", str(entry.get("name", ""))).strip()
+        try:
+            price = float(entry.get("price"))
+        except (TypeError, ValueError):
+            continue
+        if name and len(name) <= 120 and 0 <= price < 1_000_000:
+            items.append({"name": name, "price": round(price, 2)})
+    return items
 
-@app.route('/')
+
+def save_items(items):
+    if not items:
+        return
+    timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    rows = [{**item, "timestamp": timestamp} for item in items]
+    with get_connection() as connection:
+        connection.executemany(
+            "INSERT INTO grocery_items (item, price, timestamp) VALUES (?, ?, ?)",
+            [(row["name"], row["price"], row["timestamp"]) for row in rows],
+        )
+
+    # Excel is a convenient export; SQLite remains the primary data store.
+    try:
+        export_rows = pd.DataFrame(
+            [{"Item": row["name"], "Price": row["price"], "Timestamp": row["timestamp"]}
+             for row in rows]
+        )
+        EXCEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+        if EXCEL_PATH.exists():
+            old_rows = pd.read_excel(EXCEL_PATH)
+            export_rows = pd.concat([old_rows, export_rows], ignore_index=True)
+        export_rows.to_excel(EXCEL_PATH, index=False)
+    except Exception:
+        app.logger.exception("Could not update the Excel export")
+
+
+def extract_items(image_bytes, mime_type):
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError("Receipt scanning is not configured. Set GEMINI_API_KEY in your environment.")
+
+    prompt = """Read this grocery receipt and return only purchased grocery line items.
+Return valid JSON in exactly this shape: {"items":[{"name":"Milk","price":3.49}]}.
+Use the final charged price for each item. Exclude tax, subtotal, total, payment,
+change, discounts, store details, and non-product lines. Do not guess missing
+prices. Use a number for price and an empty array when no items can be read."""
+    if google_genai:
+        client = google_genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=[prompt, genai_types.Part.from_bytes(data=image_bytes, mime_type=mime_type)],
+            config=genai_types.GenerateContentConfig(response_mime_type="application/json"),
+        )
+    elif legacy_genai:
+        legacy_genai.configure(api_key=api_key)
+        model = legacy_genai.GenerativeModel(GEMINI_MODEL)
+        with Image.open(BytesIO(image_bytes)) as image:
+            response = model.generate_content(
+                [prompt, image],
+                generation_config={"response_mime_type": "application/json"},
+            )
+    else:
+        raise RuntimeError("Install the Gemini SDK with: python -m pip install -r requirements.txt")
+    if not response.text:
+        raise ValueError("The receipt scanner returned an empty response.")
+    return parse_model_items(response.text)
+
+
+@app.route("/")
 def index():
     return render_template("index.html")
 
-@app.route('/upload', methods=['POST'])
+
+@app.route("/api/history")
+def history():
+    with get_connection() as connection:
+        rows = connection.execute(
+            "SELECT id, item, price, timestamp FROM grocery_items "
+            "ORDER BY timestamp DESC, id DESC LIMIT 100"
+        ).fetchall()
+    return jsonify({"items": [dict(row) for row in rows]})
+
+
+@app.route("/upload", methods=["POST"])
 def upload():
-    if 'receipt' not in request.files:
-        return jsonify({'error': 'No image uploaded'}), 400
+    receipt = request.files.get("receipt")
+    if not receipt or not receipt.filename:
+        return jsonify(error="Choose a receipt image to upload."), 400
 
-    file = request.files['receipt']
-    if not file.filename.lower().endswith(('.png', '.jpg', '.jpeg')):
-        return jsonify({'error': 'Unsupported file type'}), 400
-
-    filename = str(uuid.uuid4()) + "_" + file.filename
-    filepath = os.path.join(UPLOAD_FOLDER, filename)
-    file.save(filepath)
+    image_bytes = receipt.read(MAX_UPLOAD_BYTES + 1)
+    if not image_bytes:
+        return jsonify(error="The selected file is empty."), 400
+    if len(image_bytes) > MAX_UPLOAD_BYTES:
+        return jsonify(error="The image must be 8 MB or smaller."), 413
 
     try:
-        image = Image.open(filepath)
-        prompt = (
-            "You're a smart assistant. Extract only grocery items with price from this receipt image. "
-            "Return the result in the format: 'ItemName Price'. Ignore tax, total, discounts, etc."
-        )
-        response = model.generate_content([prompt, image])
-        result = response.text.strip().split('\n')
-        items = [line.strip() for line in result if line.strip()]
+        with Image.open(BytesIO(image_bytes)) as image:
+            image_format = image.format
+            image.verify()
+        if image_format not in ALLOWED_FORMATS:
+            return jsonify(error="Use a JPEG, PNG, or WebP receipt image."), 415
+        mime_type = {"JPEG": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp"}[image_format]
+        items = extract_items(image_bytes, mime_type)
+        if items:
+            save_items(items)
+        return jsonify(items=items, recommendations=recommend_items(items))
+    except (UnidentifiedImageError, OSError):
+        return jsonify(error="That file could not be read as an image."), 400
+    except (json.JSONDecodeError, ValueError) as error:
+        app.logger.info("Receipt response could not be parsed: %s", error)
+        return jsonify(error="We couldn't read grocery items from that receipt. Try a clearer image."), 422
+    except Exception:
+        app.logger.exception("Receipt processing failed")
+        return jsonify(error="Receipt scanning failed. Check the API configuration and try again."), 502
 
-        save_to_db_and_excel(items)
-        recommendations = recommend_items(items)
 
-        return jsonify({'items': items, 'recommendations': recommendations})
-
-    except Exception as e:
-        return jsonify({'error': 'Gemini processing failed', 'details': str(e)}), 500
-
-if __name__ == '__main__':
-    app.run(debug=True)
+@app.errorhandler(RequestEntityTooLarge)
+def handle_large_upload(_error):
+    return jsonify(error="The image must be 8 MB or smaller."), 413
 
 
+init_db()
+
+if __name__ == "__main__":
+    app.run(debug=os.getenv("FLASK_DEBUG", "false").casefold() == "true")
